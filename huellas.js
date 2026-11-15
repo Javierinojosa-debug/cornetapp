@@ -57,29 +57,37 @@
       }
     }
   }
-  function picos({ S, T, F }) {
+  // Picos con "prominencia": cuánto sobresale cada máximo local sobre la media de su entorno.
+  // No depende del volumen global, así que el ruido de fondo (gente, viento) no tapa los picos de la música.
+  function picos({ S, T, F }, porSegundo) {
     const L = new Float32Array(S.length);
     for (let i = 0; i < S.length; i++) L[i] = 10 * Math.log10(S[i] + 1e-10);
     const A = new Float32Array(L.length), B = new Float32Array(L.length);
-    maxFiltro1D(L, A, F, 1, T, (t) => t * F, NB_F);         // a lo largo de frecuencia
-    maxFiltro1D(A, B, T, F, F, (f) => f, NB_T);             // a lo largo del tiempo
-    // umbral: percentil 70 de la banda útil (descarta silencios y ruido de fondo)
-    const util = [];
-    for (let t = 0; t < T; t += 4) for (let f = FMIN; f <= FMAX; f += 3) util.push(L[t * F + f]);
-    util.sort((a, b) => a - b);
-    const umbral = util.length ? util[Math.floor(util.length * 0.85)] : 0;
-    const P = [];
+    maxFiltro1D(L, A, F, 1, T, (t) => t * F, NB_F);
+    maxFiltro1D(A, B, T, F, F, (f) => f, NB_T);
+    // media local (caja ±12 frames × ±20 bins) con imagen integral
+    const W = F + 1, I = new Float64Array((T + 1) * W);
+    for (let t = 0; t < T; t++) { let fila = 0; for (let f = 0; f < F; f++) { fila += L[t * F + f]; I[(t + 1) * W + f + 1] = I[t * W + f + 1] + fila; } }
+    const media = (t, f) => { const t0 = Math.max(0, t - 12), t1 = Math.min(T, t + 13), f0 = Math.max(0, f - 20), f1 = Math.min(F, f + 21);
+      return (I[t1 * W + f1] - I[t0 * W + f1] - I[t1 * W + f0] + I[t0 * W + f0]) / ((t1 - t0) * (f1 - f0)); };
+    const cand = [];
     for (let t = 0; t < T; t++) for (let f = FMIN; f <= FMAX; f++) {
       const i = t * F + f;
-      if (L[i] === B[i] && L[i] > umbral) P.push([t, f]);
+      if (L[i] === B[i]) { const p = L[i] - media(t, f); if (p > 4) cand.push([t, f, p]); }
     }
-    return P; // ordenados por tiempo
+    // tope por segundo: se quedan los más prominentes
+    const porVentana = new Map(), V = Math.round(SR / HOP); // ≈31 frames = 1 s
+    for (const c of cand) { const k = Math.floor(c[0] / V); let l = porVentana.get(k); if (!l) porVentana.set(k, (l = [])); l.push(c); }
+    const P = [];
+    for (const l of porVentana.values()) { l.sort((a, b) => b[2] - a[2]); for (let i = 0; i < Math.min(porSegundo, l.length); i++) P.push([l[i][0], l[i][1]]); }
+    P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    return P;
   }
-  function hashes(P) {
+  function hashes(P, fanout) {
     const H = [];
     for (let i = 0; i < P.length; i++) {
       const [t1, f1] = P[i]; let n = 0;
-      for (let j = i + 1; j < P.length && n < FANOUT; j++) {
+      for (let j = i + 1; j < P.length && n < fanout; j++) {
         const [t2, f2] = P[j], dt = t2 - t1;
         if (dt < 1) continue;
         if (dt > DTMAX) break;
@@ -138,9 +146,11 @@
   }
 
   // ---------- API ----------
-  function analizar(pcm16) {
+  // consulta = true para lo grabado con el móvil: más picos y más parejas, para recuperar las de la base aunque haya ruido
+  function analizar(pcm16, consulta = false) {
     const E = espectro(pcm16);
-    return { hashes: hashes(picos(E)), croma: croma(E), segundos: pcm16.length / 16000 };
+    const P = picos(E, consulta ? 45 : 22);
+    return { hashes: hashes(P, consulta ? 10 : FANOUT), croma: croma(E), segundos: pcm16.length / 16000 };
   }
 
   function prepararBase(base) {             // construye el índice hash → [marcha, t]
@@ -164,10 +174,14 @@
         v.set(d, (v.get(d) || 0) + 1);
       }
     }
-    const acustica = votos.map((v) => {
-      let best = 0, at = 0;
+    const acustica = votos.map((v, k) => {
+      let best = 0, at = 0, total = 0;
+      for (const c of v.values()) total += c;
       for (const [d, c] of v) { const s = c + (v.get(d - 1) || 0) + (v.get(d + 1) || 0); if (s > best) { best = s; at = d; } }
-      return { votos: best, segundo: Math.max(0, at * HOP / SR) };
+      // votos esperados por azar en una ventana de 3 desfases
+      const rango = (base.marchas[k].segundos + q.segundos) * SR / HOP;
+      const azar = (3 * total) / Math.max(1, rango);
+      return { votos: best, azar, segundo: Math.max(0, at * HOP / SR) };
     });
     // 2) melodía: mejor transposición
     const melodia = base.marchas.map((m) => {
@@ -180,14 +194,16 @@
   }
 
   // Decisión: umbrales calibrados en pruebas (ver tools/calibrar.mjs)
-  const UMBRAL = { votos: 12, votosRelacion: 0.004, coste: 0.19 };
-  function decidir(res, nHashes) {
+  const UMBRAL = { votos: 12, votosMin: 9, vecesAzar: 10, votosRelacion: 0.001, coste: 0.19, costeLargo: 0.21 };
+  function decidir(res, nHashes, segundos = 12) {
     if (!res.length) return null;
     const porVotos = [...res].sort((a, b) => b.votos - a.votos)[0];
-    if (porVotos.votos >= UMBRAL.votos && porVotos.votos >= nHashes * UMBRAL.votosRelacion)
+    const significativo = porVotos.votos >= UMBRAL.votosMin && porVotos.votos >= UMBRAL.vecesAzar * (porVotos.azar + 0.5);
+    if ((porVotos.votos >= UMBRAL.votos && porVotos.votos >= nHashes * UMBRAL.votosRelacion) || significativo)
       return { ...porVotos, metodo: "acustica", confianza: Math.min(1, porVotos.votos / 60) };
     const porMelodia = [...res].sort((a, b) => a.coste - b.coste)[0];
-    if (porMelodia.coste <= UMBRAL.coste)
+    const maxCoste = segundos >= 18 ? UMBRAL.costeLargo : UMBRAL.coste;
+    if (porMelodia.coste <= maxCoste)
       return { ...porMelodia, metodo: "melodia", confianza: Math.max(0, Math.min(1, (UMBRAL.coste + 0.1 - porMelodia.coste) / 0.25)) };
     return null;
   }

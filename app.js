@@ -47,100 +47,115 @@
   // ---------- grabación ----------
   const wrap = $(".boton-wrap"), arco = $("#arco"), estado = $("#estado"), lema = $("#lema");
   let ultimaGrabacion = null;
-  let ocupado = false, grabador = null, stream = null, ctx = null, cancelar = null;
+  let ocupado = false, stream = null, ctx = null, cancelar = null;
 
   $("#btnEscuchar").addEventListener("click", () => (ocupado ? cancelar?.() : escuchar()));
 
-  function tipoSoportado() {
-    const op = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus", "audio/aac"];
-    return window.MediaRecorder ? op.find((t) => MediaRecorder.isTypeSupported?.(t)) || "" : null;
-  }
+  const MAX_SEG = 20, PUNTOS = [6, 9, 12, 15, 18, 20]; // escucha continua: analiza en estos segundos y para al reconocer
 
   async function escuchar() {
     if (DEMO) return simular();
-    const tipo = tipoSoportado();
-    if (tipo === null || !navigator.mediaDevices?.getUserMedia) return toast("Este navegador no permite grabar audio.");
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC || !navigator.mediaDevices?.getUserMedia) return toast("Este navegador no permite grabar audio.");
+    ctx = new AC();                                   // se crea dentro del toque (requisito de Safari)
+    const basePromesa = cargarBase();
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     } catch {
+      ctx.close().catch(() => {}); ctx = null;
       return toast("Necesito permiso para usar el micrófono.");
     }
+    await ctx.resume().catch(() => {});
     ocupado = true;
     const posPromesa = pedirUbicacion();
     wrap.classList.add("escuchando");
     lema.textContent = "Escuchando a la banda…";
     estado.textContent = "Mantén el móvil hacia la música";
 
-    // medidor de nivel para animar el botón
-    try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const an = ctx.createAnalyser(); an.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(an);
-      const d = new Uint8Array(an.fftSize);
-      const tick = () => { if (!ocupado || !ctx) return; an.getByteTimeDomainData(d);
-        let s = 0; for (const v of d) s += ((v - 128) / 128) ** 2;
-        wrap.style.setProperty("--nivel", Math.min(1, Math.sqrt(s / d.length) * 4).toFixed(2)); requestAnimationFrame(tick); };
-      tick();
-    } catch {}
+    // captura de audio sin comprimir + medidor de nivel
+    const srIn = ctx.sampleRate, trozos = [];
+    let muestras = 0;
+    const fuente = ctx.createMediaStreamSource(stream);
+    const an = ctx.createAnalyser(); an.fftSize = 512; fuente.connect(an);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    proc.onaudioprocess = (e) => { const d = e.inputBuffer.getChannelData(0); trozos.push(new Float32Array(d)); muestras += d.length; };
+    fuente.connect(proc); proc.connect(ctx.destination);   // la salida va en silencio
+    const dNivel = new Uint8Array(an.fftSize);
+    const tick = () => { if (!ocupado || !ctx) return; an.getByteTimeDomainData(dNivel);
+      let s2 = 0; for (const v of dNivel) s2 += ((v - 128) / 128) ** 2;
+      wrap.style.setProperty("--nivel", Math.min(1, Math.sqrt(s2 / dNivel.length) * 4).toFixed(2)); requestAnimationFrame(tick); };
+    tick();
 
-    const trozos = [];
-    grabador = new MediaRecorder(stream, tipo ? { mimeType: tipo } : undefined);
-    grabador.ondataavailable = (e) => e.data.size && trozos.push(e.data);
-    const fin = new Promise((res) => (grabador.onstop = res));
-    grabador.start();
+    let cancelado = false, terminado = false;
+    cancelar = () => { cancelado = true; };
+    const seg = () => muestras / srIn;
+    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+    let local = null, diagLocal = null, pcm = null;
+    const base = await basePromesa;
 
-    const t0 = performance.now();
-    let cancelado = false;
-    const timer = setInterval(() => {
-      const p = Math.min(1, (performance.now() - t0) / (SEGUNDOS * 1000));
-      arco.style.strokeDashoffset = 654 * (1 - p);
-      if (p >= 1) parar();
-    }, 100);
-    function parar() { clearInterval(timer); if (grabador?.state !== "inactive") grabador.stop(); }
-    cancelar = () => { cancelado = true; parar(); };
-
-    await fin;
+    for (const p of PUNTOS) {
+      while (!cancelado && seg() < p) { arco.style.strokeDashoffset = 654 * (1 - Math.min(1, seg() / MAX_SEG)); await esperar(100); }
+      if (cancelado) break;
+      pcm = await a16k(trozos, srIn).catch(() => null);
+      if (!pcm || !base || !base.marchas.length) continue;
+      try {
+        const q = Huellas.analizar(pcm, true), res = Huellas.buscar(base, q);
+        local = Huellas.decidir(res, q.hashes.length, q.segundos);
+        const v = [...res].sort((a, b) => b.votos - a.votos)[0], c = [...res].sort((a, b) => a.coste - b.coste)[0];
+        diagLocal = { votos: v.votos, mejorVotos: v.titulo, coste: c.coste.toFixed(3), mejorCoste: c.titulo, marchas: base.marchas.length, umbralCoste: q.segundos >= 18 ? Huellas.UMBRAL.costeLargo : Huellas.UMBRAL.coste };
+      } catch (err) { console.warn("huellas", err); }
+      if (local) break;
+      estado.textContent = p < MAX_SEG ? `Sigo escuchando… (${p} s)` : "";
+    }
+    terminado = true;
+    proc.disconnect(); fuente.disconnect();
     soltarMicro();
     wrap.classList.remove("escuchando");
     arco.style.strokeDashoffset = 654;
-    if (cancelado) return reiniciar("Cancelado");
+    if (cancelado && !local) {
+      if (seg() < 5) return reiniciar("Cancelado");
+      pcm = await a16k(trozos, srIn).catch(() => null);  // cancelado con audio suficiente: se consulta igualmente
+    }
+    if (!pcm) return reiniciar("No he podido procesar el audio");
 
-    const original = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
     wrap.classList.add("pensando");
     lema.textContent = "Buscando la marcha…";
     estado.textContent = "";
-    const pcm = await aPCM(original).catch(() => null);
-    const blob = pcm ? wavDe(pcm) : original;
-    const seg = ((performance.now() - t0) / 1000).toFixed(1);
+    const blob = wavDe(pcm), segTxt = (pcm.length / 16000).toFixed(1);
     try {
-      // 1) catálogo propio de huellas (funciona sin conexión)
-      let local = null, diagLocal = null;
-      if (pcm) {
-        try {
-          const base = await cargarBase();
-          if (base && base.marchas.length) {
-            const q = Huellas.analizar(pcm), res = Huellas.buscar(base, q);
-            local = Huellas.decidir(res, q.hashes.length);
-            const v = [...res].sort((a, b) => b.votos - a.votos)[0], c = [...res].sort((a, b) => a.coste - b.coste)[0];
-            diagLocal = { votos: v.votos, mejorVotos: v.titulo, coste: c.coste.toFixed(3), mejorCoste: c.titulo, marchas: base.marchas.length };
-          }
-        } catch (err) { console.warn("huellas", err); }
-      }
       const pos = await posPromesa;
       if (local) {
-        ultimaGrabacion = { blob, seg, diagLocal };
+        ultimaGrabacion = { blob, seg: segTxt, diagLocal };
         return resultado({ title: local.titulo, artist: local.banda, fuente: "cornetapp", metodo: local.metodo, confianza: local.confianza, segundo: local.segundo }, pos);
       }
-      // 2) AudD
-      const r = await fetch("/api/identify", { method: "POST", headers: { "content-type": blob.type }, body: blob });
+      const r = await fetch("/api/identify", { method: "POST", headers: { "content-type": "audio/wav" }, body: blob });
       const data = await r.json().catch(() => ({ ok: false, error: r.status === 404 ? "El servidor de reconocimiento no está disponible." : "Respuesta no válida." }));
       if (!data.ok) throw new Error(data.error || "Error al reconocer");
-      ultimaGrabacion = { blob, seg, diag: data.diag, diagLocal };
+      ultimaGrabacion = { blob, seg: segTxt, diag: data.diag, diagLocal };
       resultado(data.match ? { ...data.match, fuente: "audd" } : null, pos);
     } catch (e) {
       toast(e.message);
       reiniciar();
     }
+  }
+
+  // Une lo capturado (últimos 20 s), lo pasa a 16 kHz mono y normaliza el volumen
+  async function a16k(trozos, srIn) {
+    let total = trozos.reduce((n, t) => n + t.length, 0);
+    const max = Math.floor(MAX_SEG * srIn), ini = Math.max(0, total - max), len = total - ini;
+    const x = new Float32Array(len);
+    let pos = 0, salto = ini;
+    for (const t of trozos) { if (salto >= t.length) { salto -= t.length; continue; } const parte = t.subarray(salto); salto = 0; x.set(parte, pos); pos += parte.length; }
+    const n = Math.ceil((len * 16000) / srIn);
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const off = new OAC(1, n, 16000);
+    const buf = off.createBuffer(1, len, srIn); buf.getChannelData(0).set(x);
+    const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+    const pcm = new Float32Array((await off.startRendering()).getChannelData(0));
+    let pico = 0; for (const v of pcm) pico = Math.max(pico, Math.abs(v));
+    const g = pico > 0 ? Math.min(20, 0.9 / pico) : 1;
+    for (let i = 0; i < pcm.length; i++) pcm[i] *= g;
+    return pcm;
   }
 
   let basePromesa = null;
@@ -151,22 +166,6 @@
       .catch(() => { basePromesa = null; return null; }));
   }
 
-  // Decodifica la grabación a PCM mono 16 kHz con el volumen normalizado
-  async function aPCM(b) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    const ac = new AC();
-    const ab = await b.arrayBuffer();
-    const buf = await new Promise((ok, ko) => { const p = ac.decodeAudioData(ab, ok, ko); if (p && p.then) p.then(ok, ko); });
-    ac.close().catch(() => {});
-    const SR = 16000, n = Math.ceil(buf.duration * SR);
-    const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, n, SR);
-    const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
-    const pcm = new Float32Array((await off.startRendering()).getChannelData(0));
-    let pico = 0; for (const v of pcm) pico = Math.max(pico, Math.abs(v));
-    const g = pico > 0 ? Math.min(8, 0.9 / pico) : 1;
-    for (let i = 0; i < n; i++) pcm[i] = Math.max(-1, Math.min(1, pcm[i] * g));
-    return pcm;
-  }
   // WAV mono 16 kHz: formato que AudD siempre lee bien
   function wavDe(pcm) {
     const SR = 16000, n = pcm.length, dv = new DataView(new ArrayBuffer(44 + n * 2));
@@ -242,7 +241,7 @@
       ${bloqueCatalogo(m)}
       <dl class="datos" style="margin-top:${m ? 0 : 18}px">
         ${e.album ? `<dt>Disco</dt><dd>${esc(e.album)}${anioGrab ? ` (${anioGrab})` : ""}</dd>` : ""}
-        ${e.fuente === "cornetapp" ? `<dt>Fuente</dt><dd>Catálogo CornetApp · ${e.metodo === "melodia" ? "por melodía (posible coincidencia)" : "huella acústica"}${e.segundo ? ` · minuto ${Math.floor(e.segundo / 60)}:${String(Math.floor(e.segundo % 60)).padStart(2, "0")}` : ""}</dd>` : ""}
+        ${e.fuente === "cornetapp" ? `<dt>Fuente</dt><dd>Catálogo CornetApp · ${e.metodo === "melodia" ? "por melodía (posible coincidencia)" : "huella acústica"}${e.segundo && e.metodo !== "melodia" ? ` · minuto ${Math.floor(e.segundo / 60)}:${String(Math.floor(e.segundo % 60)).padStart(2, "0")}` : ""}</dd>` : ""}
         ${e.ts ? `<dt>Reconocida</dt><dd>${fecha(e.ts)}</dd>` : ""}
         ${e.pos ? `<dt>Lugar</dt><dd><a style="color:var(--oro-claro)" href="https://maps.google.com/?q=${e.pos.lat},${e.pos.lon}" target="_blank" rel="noopener">Ver en el mapa</a></dd>` : ""}
       </dl>
@@ -266,7 +265,7 @@
       ${ultimaGrabacion ? `<details style="margin-top:18px;text-align:left;font-size:12.5px;color:#a99d88">
         <summary>Diagnóstico</summary>
         <p>Formato: ${esc(ultimaGrabacion.blob.type || "?")} · ${(ultimaGrabacion.blob.size / 1024).toFixed(0)} KB · ${ultimaGrabacion.seg} s
-        ${ultimaGrabacion.diagLocal ? `<br>CornetApp (${ultimaGrabacion.diagLocal.marchas} marchas): ${ultimaGrabacion.diagLocal.votos} votos acústicos con «${esc(ultimaGrabacion.diagLocal.mejorVotos)}» (mín. ${Huellas.UMBRAL.votos}), distancia de melodía ${ultimaGrabacion.diagLocal.coste} con «${esc(ultimaGrabacion.diagLocal.mejorCoste)}» (máx. ${Huellas.UMBRAL.coste})<br>` : ""}
+        ${ultimaGrabacion.diagLocal ? `<br>CornetApp (${ultimaGrabacion.diagLocal.marchas} marchas): ${ultimaGrabacion.diagLocal.votos} votos acústicos con «${esc(ultimaGrabacion.diagLocal.mejorVotos)}» (mín. ${Huellas.UMBRAL.votos}), distancia de melodía ${ultimaGrabacion.diagLocal.coste} con «${esc(ultimaGrabacion.diagLocal.mejorCoste)}» (máx. ${ultimaGrabacion.diagLocal.umbralCoste})<br>` : ""}
         ${ultimaGrabacion.diag ? ` · servidor: ${ultimaGrabacion.diag.bytes} bytes, clave ${ultimaGrabacion.diag.token ? "sí" : "no"}, AudD ${esc(ultimaGrabacion.diag.status)}` : ""}</p>
         <audio controls src="${URL.createObjectURL(ultimaGrabacion.blob)}" style="width:100%"></audio>
         <p>Escucha la grabación: si apenas se oye la música, el micro no la está captando bien.</p>
