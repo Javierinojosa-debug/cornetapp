@@ -40,8 +40,9 @@ export default async (req) => {
     return json({ ok: false, error: msg, code }, 502);
   }
 
+  console.log("audd", JSON.stringify({ type, bytes: buf.byteLength, token: !!token, status: data.status, title: data.result?.title || null }));
   const r = data.result;
-  if (!r) return json({ ok: true, match: null });
+  if (!r) return json({ ok: true, match: null, diag: { type, bytes: buf.byteLength, token: !!token, status: data.status } });
 
   const appleArt = r.apple_music?.artwork?.url?.replace("{w}", "600").replace("{h}", "600");
   return json({

@@ -46,6 +46,7 @@
 
   // ---------- grabación ----------
   const wrap = $(".boton-wrap"), arco = $("#arco"), estado = $("#estado"), lema = $("#lema");
+  let ultimaGrabacion = null;
   let ocupado = false, grabador = null, stream = null, ctx = null, cancelar = null;
 
   $("#btnEscuchar").addEventListener("click", () => (ocupado ? cancelar?.() : escuchar()));
@@ -113,6 +114,7 @@
       const data = await r.json().catch(() => ({ ok: false, error: r.status === 404 ? "El servidor de reconocimiento no está disponible." : "Respuesta no válida." }));
       if (!data.ok) throw new Error(data.error || "Error al reconocer");
       const pos = await posPromesa;
+      ultimaGrabacion = { blob, seg: ((performance.now() - t0) / 1000).toFixed(1), diag: data.diag };
       resultado(data.match, pos);
     } catch (e) {
       toast(e.message);
@@ -204,6 +206,13 @@
         <li>Las versiones en directo cuestan más: si esa banda no ha grabado la marcha, puede no estar en la base de datos.</li>
       </ul>
       <button class="chip" data-accion="reintentar">Volver a escuchar</button>
+      ${ultimaGrabacion ? `<details style="margin-top:18px;text-align:left;font-size:12.5px;color:#a99d88">
+        <summary>Diagnóstico</summary>
+        <p>Formato: ${esc(ultimaGrabacion.blob.type || "?")} · ${(ultimaGrabacion.blob.size / 1024).toFixed(0)} KB · ${ultimaGrabacion.seg} s
+        ${ultimaGrabacion.diag ? ` · servidor: ${ultimaGrabacion.diag.bytes} bytes, clave ${ultimaGrabacion.diag.token ? "sí" : "no"}, AudD ${esc(ultimaGrabacion.diag.status)}` : ""}</p>
+        <audio controls src="${URL.createObjectURL(ultimaGrabacion.blob)}" style="width:100%"></audio>
+        <p>Escucha la grabación: si apenas se oye la música, el micro no la está captando bien.</p>
+      </details>` : ""}
     </div>`;
   }
 
