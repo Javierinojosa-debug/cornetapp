@@ -107,24 +107,52 @@
 
     const original = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
     wrap.classList.add("pensando");
-    const blob = await aWav(original).catch(() => original);
     lema.textContent = "Buscando la marcha…";
     estado.textContent = "";
+    const pcm = await aPCM(original).catch(() => null);
+    const blob = pcm ? wavDe(pcm) : original;
+    const seg = ((performance.now() - t0) / 1000).toFixed(1);
     try {
+      // 1) catálogo propio de huellas (funciona sin conexión)
+      let local = null, diagLocal = null;
+      if (pcm) {
+        try {
+          const base = await cargarBase();
+          if (base && base.marchas.length) {
+            const q = Huellas.analizar(pcm), res = Huellas.buscar(base, q);
+            local = Huellas.decidir(res, q.hashes.length);
+            const v = [...res].sort((a, b) => b.votos - a.votos)[0], c = [...res].sort((a, b) => a.coste - b.coste)[0];
+            diagLocal = { votos: v.votos, mejorVotos: v.titulo, coste: c.coste.toFixed(3), mejorCoste: c.titulo, marchas: base.marchas.length };
+          }
+        } catch (err) { console.warn("huellas", err); }
+      }
+      const pos = await posPromesa;
+      if (local) {
+        ultimaGrabacion = { blob, seg, diagLocal };
+        return resultado({ title: local.titulo, artist: local.banda, fuente: "cornetapp", metodo: local.metodo, confianza: local.confianza, segundo: local.segundo }, pos);
+      }
+      // 2) AudD
       const r = await fetch("/api/identify", { method: "POST", headers: { "content-type": blob.type }, body: blob });
       const data = await r.json().catch(() => ({ ok: false, error: r.status === 404 ? "El servidor de reconocimiento no está disponible." : "Respuesta no válida." }));
       if (!data.ok) throw new Error(data.error || "Error al reconocer");
-      const pos = await posPromesa;
-      ultimaGrabacion = { blob, seg: ((performance.now() - t0) / 1000).toFixed(1), diag: data.diag };
-      resultado(data.match, pos);
+      ultimaGrabacion = { blob, seg, diag: data.diag, diagLocal };
+      resultado(data.match ? { ...data.match, fuente: "audd" } : null, pos);
     } catch (e) {
       toast(e.message);
       reiniciar();
     }
   }
 
-  // Convierte la grabación a WAV mono 16 kHz: formato que el reconocedor siempre lee bien
-  async function aWav(b) {
+  let basePromesa = null;
+  function cargarBase() {
+    if (!window.Huellas) return Promise.resolve(null);
+    return (basePromesa ||= fetch("huellas/base.json?v=" + (window.CORNETAPP_VERSION || 1))
+      .then((r) => (r.ok ? r.json() : null)).then((b) => (b ? Huellas.prepararBase(b) : null))
+      .catch(() => { basePromesa = null; return null; }));
+  }
+
+  // Decodifica la grabación a PCM mono 16 kHz con el volumen normalizado
+  async function aPCM(b) {
     const AC = window.AudioContext || window.webkitAudioContext;
     const ac = new AC();
     const ab = await b.arrayBuffer();
@@ -133,15 +161,20 @@
     const SR = 16000, n = Math.ceil(buf.duration * SR);
     const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, n, SR);
     const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
-    const pcm = (await off.startRendering()).getChannelData(0);
+    const pcm = new Float32Array((await off.startRendering()).getChannelData(0));
     let pico = 0; for (const v of pcm) pico = Math.max(pico, Math.abs(v));
-    const g = pico > 0 ? Math.min(8, 0.9 / pico) : 1; // normaliza el volumen
-    const dv = new DataView(new ArrayBuffer(44 + n * 2));
+    const g = pico > 0 ? Math.min(8, 0.9 / pico) : 1;
+    for (let i = 0; i < n; i++) pcm[i] = Math.max(-1, Math.min(1, pcm[i] * g));
+    return pcm;
+  }
+  // WAV mono 16 kHz: formato que AudD siempre lee bien
+  function wavDe(pcm) {
+    const SR = 16000, n = pcm.length, dv = new DataView(new ArrayBuffer(44 + n * 2));
     const w = (o, t) => [...t].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
     w(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); dv.setUint32(16, 16, true);
     dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, SR, true); dv.setUint32(28, SR * 2, true);
     dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, "data"); dv.setUint32(40, n * 2, true);
-    for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i] * g)) * 32767, true);
+    for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, pcm[i] * 32767, true);
     return new Blob([dv.buffer], { type: "audio/wav" });
   }
 
@@ -209,6 +242,7 @@
       ${bloqueCatalogo(m)}
       <dl class="datos" style="margin-top:${m ? 0 : 18}px">
         ${e.album ? `<dt>Disco</dt><dd>${esc(e.album)}${anioGrab ? ` (${anioGrab})` : ""}</dd>` : ""}
+        ${e.fuente === "cornetapp" ? `<dt>Fuente</dt><dd>Catálogo CornetApp · ${e.metodo === "melodia" ? "por melodía (posible coincidencia)" : "huella acústica"}${e.segundo ? ` · minuto ${Math.floor(e.segundo / 60)}:${String(Math.floor(e.segundo % 60)).padStart(2, "0")}` : ""}</dd>` : ""}
         ${e.ts ? `<dt>Reconocida</dt><dd>${fecha(e.ts)}</dd>` : ""}
         ${e.pos ? `<dt>Lugar</dt><dd><a style="color:var(--oro-claro)" href="https://maps.google.com/?q=${e.pos.lat},${e.pos.lon}" target="_blank" rel="noopener">Ver en el mapa</a></dd>` : ""}
       </dl>
@@ -232,6 +266,7 @@
       ${ultimaGrabacion ? `<details style="margin-top:18px;text-align:left;font-size:12.5px;color:#a99d88">
         <summary>Diagnóstico</summary>
         <p>Formato: ${esc(ultimaGrabacion.blob.type || "?")} · ${(ultimaGrabacion.blob.size / 1024).toFixed(0)} KB · ${ultimaGrabacion.seg} s
+        ${ultimaGrabacion.diagLocal ? `<br>CornetApp (${ultimaGrabacion.diagLocal.marchas} marchas): ${ultimaGrabacion.diagLocal.votos} votos acústicos con «${esc(ultimaGrabacion.diagLocal.mejorVotos)}» (mín. ${Huellas.UMBRAL.votos}), distancia de melodía ${ultimaGrabacion.diagLocal.coste} con «${esc(ultimaGrabacion.diagLocal.mejorCoste)}» (máx. ${Huellas.UMBRAL.coste})<br>` : ""}
         ${ultimaGrabacion.diag ? ` · servidor: ${ultimaGrabacion.diag.bytes} bytes, clave ${ultimaGrabacion.diag.token ? "sí" : "no"}, AudD ${esc(ultimaGrabacion.diag.status)}` : ""}</p>
         <audio controls src="${URL.createObjectURL(ultimaGrabacion.blob)}" style="width:100%"></audio>
         <p>Escucha la grabación: si apenas se oye la música, el micro no la está captando bien.</p>

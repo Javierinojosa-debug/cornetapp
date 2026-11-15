@@ -1,3 +1,10 @@
 .netlify/
 node_modules/
 .DS_Store
+
+# audio de origen: nunca al repositorio
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.aac
