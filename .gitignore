@@ -8,3 +8,4 @@ node_modules/
 *.wav
 *.flac
 *.aac
+_*.f32

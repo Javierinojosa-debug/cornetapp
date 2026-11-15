@@ -4,6 +4,7 @@
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
 html,body{margin:0;height:100%}
 body{
   font-family:Inter,system-ui,-apple-system,sans-serif;color:var(--crema);
@@ -114,3 +115,13 @@ dialog input,dialog select,dialog textarea{display:block;width:100%;margin-top:4
 .toast{position:fixed;left:50%;bottom:calc(90px + var(--safe-b));transform:translate(-50%,20px);opacity:0;background:var(--crema);color:var(--noche);
   padding:10px 16px;border-radius:999px;font-size:14px;font-weight:500;transition:.25s;z-index:20;pointer-events:none;max-width:90vw;text-align:center}
 .toast.ver{opacity:1;transform:translate(-50%,0)}
+
+/* APRENDER */
+.apr-ayuda{font-size:14px;color:var(--crema-2);line-height:1.5;margin:0 0 14px}
+.apr-label{display:block;font-size:13px;color:var(--crema-2);margin-bottom:12px}
+.apr-label textarea,.apr-label input{display:block;width:100%;margin-top:5px;padding:10px;border-radius:10px;border:1px solid var(--linea);background:rgba(20,6,31,.6);color:var(--crema);font:inherit}
+.apr-botones{display:flex;gap:8px;flex-wrap:wrap}
+.apr-item{cursor:default!important}
+.apr-item.off{opacity:.55}
+.apr-titulo{width:100%;background:transparent;border:0;border-bottom:1px solid var(--linea);color:var(--crema);font:inherit;font-weight:600;padding:2px 0}
+.apr-incluir{width:22px;height:22px;accent-color:var(--oro)}

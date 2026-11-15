@@ -23,7 +23,11 @@
     const extra = leer(K.extra, {});
     const base = (window.CATALOGO_BASE || []).map((m) => extra[m.id] ? { ...m, ...extra[m.id] } : m);
     const nuevas = Object.values(extra).filter((m) => !base.some((b) => b.id === m.id));
-    return [...base, ...nuevas].sort((a, b) => a.titulo.localeCompare(b.titulo, "es"));
+    // marchas aprendidas por los usuarios que aún no tienen ficha
+    const todas = [...base, ...nuevas], tiene = (t) => todas.some((m) => norm(m.titulo) === norm(t));
+    for (const m of leer("cornetapp.aprendidas", [])) if (m.titulo && !tiene(m.titulo))
+      todas.push({ id: "apr-" + m.id, titulo: m.titulo, compositor: "", anio: null, tipo: "", hermandades: [], nota: m.banda ? `Aprendida de la grabación de ${m.banda}.` : "Aprendida por CornetApp.", alias: [] });
+    return todas.sort((a, b) => a.titulo.localeCompare(b.titulo, "es"));
   }
   function buscarEnCatalogo(titulo) {
     const t = norm(titulo);
@@ -159,11 +163,19 @@
   }
 
   let basePromesa = null;
-  function cargarBase() {
+  // Base = huellas publicadas con la app + huellas aprendidas por los usuarios (Netlify Blobs)
+  function cargarBase(forzar = false) {
     if (!window.Huellas) return Promise.resolve(null);
-    return (basePromesa ||= fetch("huellas/base.json?v=" + (window.CORNETAPP_VERSION || 1))
-      .then((r) => (r.ok ? r.json() : null)).then((b) => (b ? Huellas.prepararBase(b) : null))
-      .catch(() => { basePromesa = null; return null; }));
+    if (forzar) basePromesa = null;
+    return (basePromesa ||= Promise.all([
+      fetch("huellas/base.json?v=" + (window.CORNETAPP_VERSION || 1)).then((r) => (r.ok ? r.json() : { marchas: [] })).catch(() => ({ marchas: [] })),
+      fetch("/api/huellas").then((r) => (r.ok ? r.json() : Promise.reject())).catch(() => ({ marchas: leer("cornetapp.aprendidas", []) })),
+    ]).then(([a, b]) => {
+      const marchas = [...(a.marchas || []), ...(b.marchas || [])];
+      try { localStorage.setItem("cornetapp.aprendidas", JSON.stringify(b.marchas || [])); } catch {}
+      if (document.querySelector("#v-marchas.activa")) pintarCatalogo();
+      return Huellas.prepararBase({ marchas });
+    }).catch(() => { basePromesa = null; return null; }));
   }
 
   // WAV mono 16 kHz: formato que AudD siempre lee bien
@@ -378,6 +390,8 @@
     dlg.close(); toast("Marcha guardada"); pintarCatalogo();
   });
 
+  window.CornetApp = { cargarBase, wavDe, toast, esc, pintarCatalogo: () => pintarCatalogo() };
+
   // ---------- demo (?demo) ----------
   function simular() {
     ocupado = true; wrap.classList.add("escuchando"); lema.textContent = "Escuchando a la banda…";
@@ -396,5 +410,6 @@
   if (esIOS && !standalone && !leer("cornetapp.avisoIOS", false)) {
     setTimeout(() => { toast("Para instalarla: Compartir → Añadir a pantalla de inicio"); guardar("cornetapp.avisoIOS", true); }, 2500);
   }
+  cargarBase(); // precarga del catálogo de huellas (también deja las aprendidas en la pestaña Marchas)
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();

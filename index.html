@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div class="cera" aria-hidden="true"></div>
@@ -59,7 +59,7 @@
     <section id="v-marchas" class="vista">
       <div class="cab-vista">
         <h2>Marchas</h2>
-        <button class="chip" id="btnNueva">+ Añadir</button>
+        <div style="display:flex;gap:6px"><button class="chip ghost" id="btnAprender">Aprender lista</button><button class="chip" id="btnNueva">+ Añadir</button></div>
       </div>
       <div class="segmento" role="tablist">
         <button class="seg activo" data-modo="marchas">Marchas</button>
@@ -67,6 +67,26 @@
       </div>
       <input type="search" id="buscar" class="buscar" placeholder="Buscar marcha, compositor o hermandad…">
       <ul class="lista" id="listaCat"></ul>
+    </section>
+    <!-- APRENDER LISTA -->
+    <section id="v-aprender" class="vista">
+      <div class="cab-vista">
+        <h2>Aprender marchas</h2>
+        <button class="chip ghost" id="aprCerrar">Cerrar</button>
+      </div>
+      <div id="aprConfig">
+        <p class="apr-ayuda">Pon una lista de reproducción de marchas en otro aparato (YouTube, Spotify, un CD…) y deja el móvil cerca del altavoz con la pantalla encendida. CornetApp corta las marchas por los silencios entre pistas y aprende cada una. Solo guarda huellas, nunca el audio.</p>
+        <label class="apr-label">Títulos de la lista, en orden <small>(opcional, uno por línea; si no, intento averiguarlos)</small>
+          <textarea id="aprTitulos" rows="5" placeholder="Amarguras&#10;La Madrugá&#10;Virgen del Valle"></textarea></label>
+        <label class="apr-label">Banda <small>(opcional, si es la misma en toda la lista)</small><input id="aprBanda" placeholder="p. ej. Banda Tejera"></label>
+      </div>
+      <div class="apr-botones">
+        <button class="chip" id="aprEmpezar">Empezar a escuchar</button>
+        <button class="chip ghost" id="aprSiguiente" hidden title="Si dos marchas van seguidas sin silencio">Cortar: empieza otra</button>
+      </div>
+      <p class="estado" id="aprEstado" style="margin:14px 0 10px;text-align:left"></p>
+      <ul class="lista" id="listaAprendidas"></ul>
+      <button class="chip" id="aprGuardar" hidden style="width:100%;justify-content:center;padding:12px;margin-top:6px">Guardar</button>
     </section>
   </main>
 
@@ -110,9 +130,10 @@
 
   <div class="toast" id="toast" role="status"></div>
 
-  <script>window.CORNETAPP_VERSION = 6;</script>
-  <script src="huellas.js?v=6"></script>
-  <script src="catalogo.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script>window.CORNETAPP_VERSION = 8;</script>
+  <script src="huellas.js?v=8"></script>
+  <script src="catalogo.js?v=8"></script>
+  <script src="app.js?v=8"></script>
+  <script src="aprender.js?v=8"></script>
 </body>
 </html>
