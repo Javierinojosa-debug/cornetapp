@@ -105,8 +105,9 @@
     arco.style.strokeDashoffset = 654;
     if (cancelado) return reiniciar("Cancelado");
 
-    const blob = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
+    const original = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
     wrap.classList.add("pensando");
+    const blob = await aWav(original).catch(() => original);
     lema.textContent = "Buscando la marcha…";
     estado.textContent = "";
     try {
@@ -120,6 +121,28 @@
       toast(e.message);
       reiniciar();
     }
+  }
+
+  // Convierte la grabación a WAV mono 16 kHz: formato que el reconocedor siempre lee bien
+  async function aWav(b) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    const ab = await b.arrayBuffer();
+    const buf = await new Promise((ok, ko) => { const p = ac.decodeAudioData(ab, ok, ko); if (p && p.then) p.then(ok, ko); });
+    ac.close().catch(() => {});
+    const SR = 16000, n = Math.ceil(buf.duration * SR);
+    const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, n, SR);
+    const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    let pico = 0; for (const v of pcm) pico = Math.max(pico, Math.abs(v));
+    const g = pico > 0 ? Math.min(8, 0.9 / pico) : 1; // normaliza el volumen
+    const dv = new DataView(new ArrayBuffer(44 + n * 2));
+    const w = (o, t) => [...t].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+    w(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); dv.setUint32(16, 16, true);
+    dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, SR, true); dv.setUint32(28, SR * 2, true);
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, "data"); dv.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i] * g)) * 32767, true);
+    return new Blob([dv.buffer], { type: "audio/wav" });
   }
 
   function soltarMicro() {
