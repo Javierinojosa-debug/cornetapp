@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#4b1a6b"/>
+      <stop offset="1" stop-color="#1a0828"/>
+    </radialGradient>
+    <linearGradient id="oro" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6d98b"/>
+      <stop offset=".55" stop-color="#d4a64a"/>
+      <stop offset="1" stop-color="#9c7124"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#d4a64a" stroke-opacity=".25" stroke-width="6"/>
+  <!-- banderín -->
+  <path d="M178 300 h124 v92 l-62 -26 l-62 26 z" fill="#7d1d3f" stroke="url(#oro)" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M206 328 h68 M240 312 v44" stroke="url(#oro)" stroke-width="7" stroke-linecap="round"/>
+  <!-- tubo y vuelta -->
+  <ellipse cx="236" cy="236" rx="96" ry="58" fill="none" stroke="url(#oro)" stroke-width="22"/>
+  <path d="M112 296 H336" stroke="#d9ac52" stroke-width="22" stroke-linecap="round"/>
+  <!-- boquilla -->
+  <path d="M92 284 h30 v24 h-30 z" fill="url(#oro)"/>
+  <circle cx="90" cy="296" r="16" fill="url(#oro)"/>
+  <!-- pabellón -->
+  <path d="M328 284 C372 276 396 238 420 186 L420 406 C396 354 372 316 328 308 Z" fill="url(#oro)"/>
+  <ellipse cx="420" cy="296" rx="12" ry="110" fill="#f6d98b"/>
+</svg>

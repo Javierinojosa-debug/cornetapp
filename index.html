@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CornetApp — ¿Qué marcha suena?</title>
+  <meta name="description" content="Escucha la banda y te dice qué marcha procesional suena, quién la compuso y qué hermandades la llevan.">
+  <meta name="theme-color" content="#2a0f3d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CornetApp">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="cera" aria-hidden="true"></div>
+
+  <header class="top">
+    <img src="icons/icon.svg" alt="" class="logo">
+    <h1>Cornet<span>App</span></h1>
+    <button id="btnInstalar" class="chip" hidden>Instalar</button>
+  </header>
+
+  <main>
+    <!-- ESCUCHAR -->
+    <section id="v-escuchar" class="vista activa">
+      <p class="lema" id="lema">Toca la corneta mientras pasa la banda</p>
+      <div class="boton-wrap">
+        <span class="onda o1"></span><span class="onda o2"></span><span class="onda o3"></span>
+        <svg class="progreso" viewBox="0 0 220 220" aria-hidden="true"><circle id="arco" cx="110" cy="110" r="104"/></svg>
+        <button id="btnEscuchar" class="boton-corneta" aria-label="Escuchar y reconocer marcha">
+          <img src="icons/icon.svg" alt="">
+        </button>
+      </div>
+      <p class="estado" id="estado">&nbsp;</p>
+      <div class="consejos" id="consejos">
+        <p>Acércate a la banda y deja sonar al menos 10 segundos.</p>
+        <label class="toggle"><input type="checkbox" id="chkUbicacion"> Guardar el lugar en el historial</label>
+      </div>
+    </section>
+
+    <!-- HISTORIAL -->
+    <section id="v-historial" class="vista">
+      <div class="cab-vista">
+        <h2>Historial</h2>
+        <button class="chip ghost" id="btnBorrarHist">Vaciar</button>
+      </div>
+      <ul class="lista" id="listaHist"></ul>
+      <p class="vacio" id="vacioHist">Aún no has reconocido ninguna marcha.</p>
+    </section>
+
+    <!-- MARCHAS / HERMANDADES -->
+    <section id="v-marchas" class="vista">
+      <div class="cab-vista">
+        <h2>Marchas</h2>
+        <button class="chip" id="btnNueva">+ Añadir</button>
+      </div>
+      <div class="segmento" role="tablist">
+        <button class="seg activo" data-modo="marchas">Marchas</button>
+        <button class="seg" data-modo="hermandades">Hermandades</button>
+      </div>
+      <input type="search" id="buscar" class="buscar" placeholder="Buscar marcha, compositor o hermandad…">
+      <ul class="lista" id="listaCat"></ul>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button data-vista="escuchar" class="activo"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm7 9a7 7 0 0 1-14 0M12 19v3"/></svg>Escuchar</button>
+    <button data-vista="historial"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>Historial</button>
+    <button data-vista="marchas"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12-2a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>Marchas</button>
+  </nav>
+
+  <!-- FICHA (hoja inferior) -->
+  <div class="velo" id="velo" hidden></div>
+  <article class="hoja" id="hoja" aria-hidden="true"></article>
+
+  <!-- FORMULARIO MARCHA -->
+  <dialog id="dlgMarcha">
+    <form method="dialog" id="frmMarcha">
+      <h3 id="frmTitulo">Añadir marcha</h3>
+      <input type="hidden" name="id">
+      <label>Título<input name="titulo" required></label>
+      <label>Compositor<input name="compositor"></label>
+      <div class="fila">
+        <label>Año<input name="anio" inputmode="numeric" pattern="[0-9]{4}"></label>
+        <label>Formación
+          <select name="tipo">
+            <option value="">—</option>
+            <option>Cornetas y tambores</option>
+            <option>Agrupación musical</option>
+            <option>Banda de música</option>
+            <option>Varias formaciones</option>
+          </select>
+        </label>
+      </div>
+      <label>Hermandades que la llevan <small>(separadas por comas)</small><input name="hermandades" placeholder="p. ej. Jesús Nazareno (Osuna)"></label>
+      <label>Nota<textarea name="nota" rows="2"></textarea></label>
+      <div class="acciones">
+        <button type="button" class="chip ghost" id="frmCancelar">Cancelar</button>
+        <button type="submit" class="chip" value="ok">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="catalogo.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
